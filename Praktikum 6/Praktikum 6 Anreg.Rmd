@@ -1,0 +1,470 @@
+---
+title: "Praktikum 6 Anreg"
+author: "Intan Aisa"
+date: "`r Sys.Date()`"
+output: 
+  rmdformats::readthedown
+---
+
+# Library
+
+```{r, warning = FALSE, message = FALSE}
+library(readxl) # untuk membaca data
+library(GGally) # untuk menghasilkan matriks hubungan antarpeubah
+library(corrplot) # untuk menghasilkan matriks korelasi
+library(dplyr) # untuk manipulasi data
+library(car) # untuk memeriksa multikolinearitas
+library(stargazer) # untuk menampilkan hasil perbandingan regresi
+library(lmtest) # untuk uji kehomogenan ragam sisaan dan saling bebas
+library(olsrr) # untuk pemeriksaan amatan tidak biasa
+```
+
+Data
+
+```{r}
+dt <- read_xlsx("/Users/intanaisa/Documents/Kuliah/Semester 4/Analisis Regresi/Dataset Anreg.xlsx")
+dt
+```
+
+```{r}
+str(dt) # menampilkan tipe data setiap peubah
+```
+
+```{r}
+summary(dt) # menampilkan ringkasan data
+```
+
+Data yang digunakan adalah data dari 22 Kabupaten/Kota di Nusa Tenggara Timur pada Tahun 2022 dengan 1 peubah respon yaitu Persentase Penduduk Miskin (PPM) dan 5 peubah penjelas. Peubah tersebut adalah Indeks Pembangunan Manusia (IPM), Rata-rata Lama Sekolah (RLS), Persentase Penduduk yang Buta Huruf (PBH), Produk Domestik Regional Bruto (PDRB), persentase penduduk yang menggunakan kayu bakar (PKB).
+
+Untuk mempermudah dalam komputasi, karena peubah wilayah tidak digunakan, maka dapat dihapus. Pada praktikum kali ini akan dilakukan dua pemodelan, yakni model dengan seluruh peubah kuantitatif dan model dengan adanya peubah kualitatif, supaya lebih mudah dalam analisisnya maka akan dibentuk dua data berbeda.
+
+```{r}
+dt <- select(dt, -Provinsi)
+
+library(dplyr)
+
+dt <- dt %>% 
+  rename(
+    Y = `Jumlah Pengunjung (Y)`,
+    X1 = `Jumlah Tenaga Kerja`,
+    X2 = `Jumlah Objek Wisata`,
+    X3 = `Total Pengeluaran`,
+    X4 = `Tindak Pidana Korupsi`,
+    X5 = `Usaha Akomodasi`
+  )
+```
+
+# Eksplorasi Data
+
+## Peubah Respon
+
+```{r}
+hist(dt$Y, main = "Sebaran Jumlah Pengunjung Objek Wisata")
+```
+
+```{r}
+boxplot(dt$Y, main = "Sebaran Jumlah Pengunjung Objek Wisata")
+```
+
+## Peubah Pennjelas vs Peubah Respon
+
+### X1 
+
+```{r}
+plot(dt$X1, dt$Y)
+```
+
+Hubungan antara peubah X1 dan Y cenderung linear positif.
+
+### X2
+
+```{r}
+plot(dt$X2, dt$Y)
+```
+
+Hubungan antara peubah X2 dan PPM cenderung linear positif.
+
+### X3
+
+```{r}
+plot(dt$X3, dt$Y)
+```
+
+Hubungan linearitas tampak antara peubah X3 dan Y, namun pada kuartil atas terlihat beberapa amatan X3 cenderung lebih menyebar terhadap Y.
+
+### X4
+
+```{r}
+plot(dt$X4, dt$Y)
+```
+
+Hubungan antara peubah X4 dan Y cenderung tidak linear.
+
+# X5
+
+```{r}
+plot(dt$X5, dt$Y)
+```
+
+Hubungan antara peubah X5 dan Y cenderung tidak linear.
+
+## Korelasi
+
+```{r}
+ggpairs(dt,
+        upper = list(continuous = wrap('cor', size = 3)),
+        title = "Matriks Scatterplot Data")
+```
+
+```{r}
+cor_matrix <- cor(dt, use = "complete.obs")
+
+corrplot(cor_matrix, method = "color", type = "lower",
+         col = colorRampPalette(c("red", "white", "blue"))(200),
+         addCoef.col = "black", tl.col = "black", tl.srt = 35)
+```
+
+
+Berdasarkan visualisasi korelogram, nilai koefisien korelasi Pearson antara variabel respon ($Y$) dengan seluruh variabel prediktor ($X_1, X_2, X_3, X_4, X_5$) menunjukkan hubungan linear positif. Seluruh nilai korelasi bernilai positif (berwarna biru), yang berarti jika variabel prediktor meningkat, maka jumlah pengunjung ($Y$) juga cenderung meningkat.
+
+**Korelasi Antara Variabel Respon ($Y$) dengan Variabel Prediktor**
+
+- $Y$ dengan $X_3$ (Total Pengeluaran): Memiliki hubungan linear positif yang paling kuat dengan nilai korelasi sebesar 0.92. Hal ini menunjukkan bahwa total pengeluaran memiliki pengaruh linear searah yang sangat dominan terhadap jumlah pengunjung.
+
+- $Y$ dengan $X_1$ (Jumlah Tenaga Kerja) & $X_5$ (Usaha Akomodasi): Memiliki hubungan linear positif yang sangat kuat, masing-masing sebesar 0.87 dan 0.84.
+
+- $Y$ dengan $X_2$ (Jumlah Objek Wisata): Memiliki hubungan linear positif yang kuat sebesar 0.81.
+
+- $Y$ dengan $X_4$ (Tindak Pidana Korupsi): Memiliki hubungan linear positif yang paling lemah/moderat di antara variabel lainnya, yaitu sebesar 0.60.
+
+**IIndikasi Multikolinieritas**
+
+Berdasarkan matriks korelasi, ditemukan indikasi kuat terjadinya multikolinieritas tinggi (hubungan linear antar variabel bebas) pada model ini. Hal ini dibuktikan dengan adanya korelasi yang sangat kuat di antara sesama variabel prediktor ($X$), antara lain:
+
+- $X_1$ (Jumlah Tenaga Kerja) dengan $X_2$ (Jumlah Objek Wisata): Korelasi sebesar 0.98 (Sangat Kuat).
+
+- $X_1$ (Jumlah Tenaga Kerja) dengan $X_5$ (Usaha Akomodasi): Korelasi sebesar 0.92 (Sangat Kuat).
+
+- $X_3$ (Total Pengeluaran) dengan $X_5$ (Usaha Akomodasi): Korelasi sebesar 0.92 (Sangat Kuat).
+
+# Pemodelan
+
+```{r}
+model1 = lm(formula = Y ~ ., data = dt)
+summary(model1)
+```
+
+
+Persamaan yang terbentuk adalah
+$$\hat{Y} = 1240974.70509 + 6966.61471X_1 - 89432.93528X_2 + 0.00004X_3 + 205.09028X_4 - 5502.54246X_5$$
+
+Pada ringkasan model ini dapat dilihat bahwa secara simultan minimal ada satu peubah penjelas yang berpengaruh signifikan terhadap Y. Hal tersebut selaras karena terdapat dugaan parameter yang signifikan pada taraf nyata 5%, yaitu peubah X1 dan X3. 
+
+# Pemeriksaan Multikolinearitas
+
+## Perubahan Peubah
+
+```{r}
+mod1 <- lm(Y ~ ., dt[1:2])
+mod2 <- lm(Y ~ ., dt[1:3])
+mod3 <- lm(Y ~ ., dt[1:4])
+mod4 <- lm(Y ~ ., dt[1:5])
+mod5 <- lm(Y ~ ., dt)
+
+stargazer(mod1, mod2, mod3, mod4, mod5,
+          type = "text", single.row = TRUE)
+
+```
+
+## Perubahan Banyak Data
+
+```{r}
+mod5_1 <- lm(Y ~ ., dt[1:15,])
+stargazer(summary(mod5)$coefficients, summary(mod5_1)$coefficients,
+          type = "text",
+          font.size = "small")
+```
+
+## Akar Ciri
+
+```{r}
+x <- dt[-1]
+r <- cor(x)
+(ev <- eigen(r)$values)
+```
+
+```{r}
+# Simultan
+if ((max(ev) / min(ev)) <= 100) {
+  cat("Tidak ada multikolinearitas\n")
+} else if ((max(ev) / min(ev)) > 100 & (max(ev) / min(ev)) <= 1000) {
+  cat("Ada multikolinearitas yang lemah\n")
+} else {
+  cat("Ada multikolinearitas yang kuat\n")
+}
+```
+Rasio nilai eigen maksimum terhadap minimum (Condition Number) menghasilkan nilai sebesar $684.58$ (berada di rentang $100 < CN \le 1000$). Hal ini mengindikasikan adanya gejala multikolinieritas yang terdeteksi pada tingkat lemah hingga moderat secara simultan di dalam model.
+
+```{r}
+# Parsial
+if (all((max(ev) / ev) <= 1000)) {
+  cat("Tidak ada multikolinearitas\n")
+} else {
+  cat("Ada multikolinearitas pada peubah penjelas ke:", which((max(ev) / ev) > 1000), "\n")
+}
+```
+Melalui pengujian parsial dengan nilai ambang batas ketat ($CN > 1000$), secara komparatif sistem tidak mendeteksi adanya struktur multikolinieritas spesifik yang ekstrem pada peubah tertentu.
+
+## Nilai VIF
+
+```{r}
+vif(model1)
+```
+Meskipun uji nilai eigen menunjukkan gejala yang lemah secara simultan, pemeriksaan lebih detail melalui nilai VIF menunjukkan indikasi multikolinieritas yang nyata dan kuat pada beberapa peubah independen. Peubah $X_1$ ($VIF = 97.214621$), $X_2$ ($VIF = 64.718466$), dan $X_3$ ($VIF = 11.782103$) memiliki nilai VIF yang jauh melebihi batas toleransi umum ($VIF > 10$). Sementara itu, peubah $X_4$ dan $X_5$ dinyatakan bebas dari multikolinieritas ($VIF < 10$). Penanganan dari permasalahan ini dilakukan dengan menghilangkan peubah dengan nilai VIF tertinggi, yaitu X1.
+
+
+# Pemodelan Penyisihan Peubah
+
+```{r}
+model2 <- lm(Y ~ X2+X3+X4+X5, data = dt)
+summary(model2)
+```
+
+Persamaan yang terbentuk adalah
+
+$$\hat{Y} = -442635.90181 + 20112.12045X_2 + 0.00007X_3 + 77.96198X_4 - 3625.30829X_5$$
+
+Pada ringkasan model ini dapat dilihat bahwa secara simultan minimal ada satu peubah penjelas yang berpengaruh signifikan terhadap $Y$ (karena nilai p-value pada F-statistic sebesar $0.000000000001417$ jauh lebih kecil dari taraf nyata 5%). Hal tersebut selaras karena terdapat dugaan parameter yang signifikan secara parsial pada taraf nyata 5%, yaitu peubah $X_3$ (dengan nilai p-value $0.00000801 < 0.05$). Sementara itu, peubah lainnya ($X_2, X_4,$ dan $X_5$) tidak berpengaruh signifikan secara parsial terhadap $Y$ pada taraf nyata tersebut.
+
+## Nilai VIF
+
+```{r}
+vif(model2)
+```
+
+Model hasil reduksi peubah menunjukkan bahwa nilai VIF < 10 sehingga dinyatakan tidak terjadi multikolinearitas.
+
+# Pengujian Asumsi
+
+## Eksplorasi Grafik
+
+### Plot Sisaan vs Y duga
+
+```{r}
+plot(model2,1) 
+```
+Berdasarkan grafik Residuals vs Fitted yang diperoleh dari hasil pemodelan lm(Y ~ X2 + X3 + X4 + X5), berikut adalah analisis terhadap asumsi kehomogenan ragam sisaan (homoskedastisitas) dan kelinieran model:
+
+1. Uji Nilai Harapan Sisaan: Sisaan (residuals) terlihat menyebar di sekitar garis horizontal nol (0). Hal ini mengindikasikan bahwa nilai harapan (expected value) dari sisaan secara umum mendekati atau sama dengan nol, yang berarti asumsi kelinieran model terpenuhi secara rata-rata.\
+
+2. Pemeriksaan Kehomogenan Ragam (Homoskedastisitas): Lebar pita atau sebaran titik-titik sisaan terlihat tidak sama untuk setiap nilai dugaan (fitted values). Sebaran titik menumpuk rapat di area nilai dugaan kecil (sebelah kiri), namun melebar secara drastis pada nilai dugaan yang lebih besar (sebelah kanan).\
+
+3. Pola Sisaan: Pola plot sisaan ini cenderung membentuk pola melebar menyerupai corong atau kipas. Pola corong yang kentara ini mengonfirmasi adanya pelanggaran asumsi heteroskedastisitas, yang berarti ragam sisaan bersifat tidak homogen (heteroskedastisitas). Selain itu, terdapat beberapa titik data pencilan (outlier) yang posisinya sangat jauh dari pusat sebaran, seperti data ke-34 dan ke-25.
+
+### Plot Sisaan vs Urutan
+
+```{r}
+plot(x = 1:dim(dt)[1],
+     y = model2$residuals,
+     type = 'b', 
+     ylab = "Residuals",
+     xlab = "Observation")
+```
+Berdasarkan grafik Plot Sisaan vs Urutan, berikut adalah hasil analisis mengenai ada atau tidaknya ketergantungan antar-sisaan berdasarkan urutan waktu/data:
+
+1. Pola Acak Sisaan: Secara umum, fluktuasi titik-titik sisaan dari pengamatan ke-1 hingga pengamatan ke-23 bergerak naik-turun secara acak di sekitar garis nol (0) tanpa membentuk pola gelombang (cyclical) atau tren linier yang konsisten. Hal ini menunjukkan tidak adanya indikasi autokorelasi yang kuat pada mayoritas runtun data.\
+
+2. Deteksi Data Ekstrem (Pencilan): Terdapat fluktuasi drastis yang sangat mencolok di akhir urutan pengamatan. Sisaan menukik tajam ke bawah pada pengamatan ke-25 dan melonjak sangat tinggi pada pengamatan ke-34.\
+
+3. Kesimpulan Asumsi: Meskipun terdapat lonjakan ekstrem pada data ke-25 dan ke-34 (yang bertindak sebagai outlier), secara keseluruhan sisaan tidak membentuk pola sistematis yang berulang. Oleh karena itu, asumsi bahwa sisaan bersifat saling bebas (tidak terjadi masalah autokorelasi yang serius) masih dapat terpenuhi secara tentatif, namun data pencilan tersebut perlu mendapat perhatian khusus karena berpotensi mengganggu stabilitas model.
+
+### QQ plot
+
+```{r}
+plot(model2,2)
+```
+Berdasarkan grafik Q-Q Residuals, mayoritas sisaan sebenarnya sudah berdistribusi normal karena menempel rapat pada garis referensi di bagian tengah, namun keberadaan dua data pencilan ekstrem (data ke-25 dan ke-34) pada ujung ekor menyebabkan asumsi kenormalan sisaan secara keseluruhan menjadi terlanggar.
+
+## Uji Formal
+
+### Nilai harapan sisaan sama dengan nol
+
+```{r}
+t.test(model2$residuals,mu = 0,conf.level = 0.95)
+```
+
+Nilai p pada uji t sama dengan 1 yang lebih besar dari alpha 5%, sehingga dinyatakan asumsi nilai harapan sisaan sama dengan nol terpenuhi
+
+### Ragam sisaan homogen
+
+```{r}
+bptest(model2)
+```
+
+Berdasarkan hasil uji Breusch-Pagan, diperoleh nilai $p\text{-value} = 0.00006312$. Karena nilai p-value jauh lebih kecil dari taraf nyata $5\%\ (0.00006312 < 0.05)$, maka tolak $H_0$ dan terima $H_1$. Hal ini menunjukkan bahwa ragam sisaan bersifat tidak konstan, sehingga asumsi ragam sisaan homogen tidak terpenuhi (terjadi masalah heteroskedastisitas).
+
+### Sisaan saling bebas
+
+```{r}
+dwtest(model2)
+```
+
+Nilai p pada uji durbin watson sama dengan 0.1045 yang lebih besar dari alpha 5%, sehingga dinyatakan asumsi sisaan saling bebas terpenuhi
+
+### Normalitas Sisaan
+
+```{r}
+shapiro.test(model2$residuals)
+```
+
+Berdasarkan hasil uji Shapiro-Wilk, diperoleh nilai $p\text{-value} = 0.000000007128$. Karena nilai p-value jauh lebih kecil dari taraf nyata $5\%\ (0.000000007128 < 0.05)$, maka tolak $H_0$. Hal ini menunjukkan bahwa sisaan model tidak mengikuti distribusi normal, sehingga asumsi normalitas sisaan tidak terpenuhi.
+
+# Pemeriksaan Amatan Tidak Biasa
+
+```{r, error=TRUE}
+#fungsi
+ri_stud <- rstudent(model2)
+ri_stan <- rstandard(model2)
+hii_fungsi <- hatvalues(model2)
+
+#manual
+X <- model.matrix(model2)
+X_inv_xt <- X %*% solve(t(X) %*% X) %*% t(X)
+hii_manual <- diag(X_inv_xt)
+anova_model <- anova(model2)
+s <- sqrt(anova_model["Residuals", "Mean Sq"])
+ei <- model2$residuals
+ri_manual <- ei/(s*sqrt(1-hii_manual))
+
+nilai <- data.frame(ri_stud, ri_stan, ri_manual, hii_fungsi, hii_manual)
+nilai
+```
+Matriks $X^TX$ tidak memiliki invers sehingga koefisien regresi tidak dapat dihitung. Nilai reciprocal condition number yang sangat kecil ($3.93802 \times 10^{-24} \approx 0$) mengonfirmasi adanya masalah multikolinieritas sempurna (korelasi senilai 1 atau -1) antar variabel independen atau jumlah variabel melebihi jumlah data pengamatan.
+
+## Pencilan
+
+```{r, error=TRUE}
+for (i in 1:dim(nilai)[1]){
+  absri <- abs(nilai[,2])
+  pencilan <- which(absri > 2)
+}
+pencilan
+```
+Matriks $X^TX$ yang singular berdampak pada matriks nilai yang tak dapat dibuat. Sehingga pengidentifikasian pencilan secara manual tak bisa dilakukan.
+
+## Leverage
+
+```{r, error=TRUE}
+n <- dim(dt)[1]
+p <- length(model2$coefficients)
+
+for (i in 1:dim(nilai)[1]){
+  cutoff <- 2*p/n
+  titik_leverage <- which(hii_fungsi > cutoff)
+}
+titik_leverage
+```
+Matriks $X^TX$ yang singular berdampak pada matriks nilai yang tak dapat dibuat. Sehingga pengidentifikasian leverage secara manual tak bisa dilakukan.
+
+
+```{r}
+ols_plot_resid_lev(model2)
+```
+Berdasarkan grafik diagnostik, sebagian besar amatan berada pada kondisi normal (warna biru). Namun, pengamatan ke-10, 20, 31, dan 33 terdeteksi sebagai leverage points karena memiliki nilai ekstrem pada peubah penjelas (melebihi batas 0.294), sedangkan pengamatan ke-25 dan 34 teridentifikasi sebagai data pencilan sekaligus penumpil (outlier & leverage) yang paling berpengaruh ekstrem karena sisaan bakunya menembus batas $\pm 2$.
+
+## Amatan Berpengaruh
+
+### Jarak Cook
+
+```{r}
+di <- cooks.distance(model2)
+f <- qf(0.05,p,n-p, lower.tail = F)
+data.frame(di, di>f)
+```
+
+```{r}
+cooks_crit = f
+model_cooks <- cooks.distance(model2)
+df <- data.frame(obs = names(model_cooks),
+                 cooks = model_cooks)
+ggplot(df, aes(y = cooks, x = obs)) +
+  geom_point() +
+  geom_hline(yintercept = cooks_crit, linetype="dashed") +
+  labs(title = "Cook's Distance",
+       subtitle = "Influential Observation ",
+       x = "Observation Number",
+       y = "Cook's")
+```
+
+Pemeriksaan amatan berpengaruh dengan jarak cook mengidentifikasi amatan 25 dan 34 sebagai amatan berpengaruh
+
+### DFBETAS
+
+```{r}
+ols_plot_dfbetas(model2)
+```
+
+Hasil DFBETAS akan menunjukkan pengaruh observasi terhadap setiap koefisien regresi, sehingga ada output untuk setiap parameter regresi. DFBETAS mengukur seberapa besar koefisien regresi berubah jika suatu observasi dihapus dari model.
+
+### DFFITS
+
+```{r}
+ols_plot_dffits(model2)
+```
+
+Hasil DFFITS menunjukkan pengaruh observasi terhadap nilai prediksi Y, sehingga hanya menghasilkan satu output. DFFITS mengukur seberapa besar nilai prediksi $\hat{Y}_i$ berubah jika suatu observasi dihapus dari model, sehingga lebih tepat digunakan jika ingin melihat pengaruh observasi terhadap hasil model secara keseluruhan
+
+```{r, error=TRUE}
+DFFITSi <- dffits(model2)
+
+amatan_berpengaruh <- vector("list", dim(nilai)[1])
+for (i in 1:dim(nilai)[1]) {
+  cutoff <- 2 * sqrt((p / n))
+  amatan_berpengaruh[[i]] <- which(abs(DFFITSi) > cutoff)
+}
+berpengaruh <- unlist(amatan_berpengaruh)
+amatan_berpengaruh <- sort(unique(berpengaruh))
+amatan_berpengaruh
+```
+
+Matriks $X^TX$ yang singular berdampak pada matriks nilai yang tak dapat dibuat. Sehingga pengidentifikasian menggunakan DFFITS secara manual tidak dapat dilakukan.
+
+# Pemodelan Penyisihan Amatan
+
+```{r}
+# gunakan peubah penjelas yang sudah diseleksi
+
+dt1 <- dt %>% slice(-25)
+model3 <- lm(Y ~ X2 + X3 + X4 + X5, dt1)
+
+dt2 <- dt %>% slice(-34)
+model4 <- lm(Y ~ X2 + X3 + X4 + X5, dt2)
+
+dt3 <- dt %>% slice(-c(25, 34))
+model5 <- lm(Y ~ X2 + X3 + X4 + X5, dt3)
+```
+
+```{r}
+get_metrics <- function(model) {
+  adj_r2 <- summary(model)$adj.r.squared
+  sse <- sum(model$residuals^2)
+  return(c(adj_r2, sse))
+}
+
+model_metrics <- data.frame(
+  Model = c("Model 2", "Model 3", "Model 4", "Model 5"),
+  Adjusted_R2 = sapply(list(model2, model3, model4, model5), 
+                       function(m) get_metrics(m)[1]),
+  SSE = sapply(list(model2, model3, model4, model5), 
+               function(m) get_metrics(m)[2])
+)
+
+print(model_metrics)
+```
+Berdasarkan hasil perbandingan tersebut, didapatkan bahwa model 4 yang menyisihkan amatan ke-34 memiliki nilai adjusted R square terbesar dan SSE yang terkecil.
+
+```{r}
+stargazer(model2, model4, type = "text", font.size = "small",
+          report = "vc*p")
+```
+
