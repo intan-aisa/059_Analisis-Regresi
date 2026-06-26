@@ -1,0 +1,214 @@
+---
+title: "Praktikum 8 Analisis Regresi"
+author: "Intan Aisa"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown
+---
+
+# Package
+
+```{r}
+library(readxl)
+library(car) # untuk multikolinearitas
+library(olsrr) # untuk best subset
+library(MASS) # untuk forward, backward, dan stepwise
+library(glmnet) # untuk ridge dan lasso
+```
+
+# Uji F Parsial dan Sekuensial
+
+```{r}
+data(mtcars)
+head(mtcars)
+```
+Kita Pakai : Y = mpg, X1 = wt, X2 = hp, X3 = disp
+
+## F Sekuensial
+
+```{r}
+# Model 1: tanpa prediktor
+m1 <- lm(mpg ~ 1, data = mtcars)
+
+# Model 2: tambah wt
+m2 <- lm(mpg ~ wt, data = mtcars)
+
+# Model 3: tambah hp
+m3 <- lm(mpg ~ wt + hp, data = mtcars)
+
+# Model 4 : tambah disp
+m4 <- lm(mpg ~ wt + hp + disp, data = mtcars)
+
+```
+
+
+```{r}
+anova(m1, m2, m3, m4)
+```
+Variabel wt berpengaruh signifikan terhadap mpg (p < 0.001).
+Setelah memasukkan wt, variabel hp masih memberikan tambahan pengaruh yang signifikan (p ≈ 0.0018).
+Namun, setelah wt dan hp ada dalam model, variabel disp tidak memberikan pengaruh tambahan yang signifikan (p ≈ 0.93).
+
+Kesimpulan: Model yang cukup baik adalah mpg∼wt+hp, karena penambahan disp tidak meningkatkan kemampuan model secara signifikan.
+
+## F Parsial
+
+Akan diuji apakah hp signifikan setelah semua variabel lain dikontrol
+```{r}
+# full model
+full <- lm(mpg ~ wt + hp + disp, data = mtcars)
+
+# reduced (tanpa hp)
+red <- lm(mpg ~ wt + disp, data = mtcars)
+
+anova(red, full)
+```
+Variabel hp berpengaruh signifikan terhadap mpg setelah mengontrol wt dan disp (p < 0.05).
+
+
+# Data
+
+Data yang digunakan memiliki 29 amatan berupa Kabupaten/Kota di Papua dengan 1 peubah respon yaitu persentase penduduk miskin (PPM) dan 5 peubah penjelas, yaitu luas daerah (LD), angka harapan hidup (AHH), produk domestik regional bruto (PDRB), gaji bersih standar (GBS), dan laju pertumbuhan penduduk (LPD).
+
+```{r}
+data <- read_xlsx("/Users/intanaisa/Documents/Kuliah/Semester 4/Analisis Regresi/Dataset Anreg.xlsx")
+data
+```
+
+```{r}
+library(dplyr)
+
+data <- data %>% dplyr::select(-Provinsi)
+
+data <- data %>% 
+  rename(
+    Y = `Jumlah Pengunjung (Y)`,
+    X1 = `Jumlah Tenaga Kerja`,
+    X2 = `Jumlah Objek Wisata`,
+    X3 = `Total Pengeluaran`,
+    X4 = `Tindak Pidana Korupsi`,
+    X5 = `Usaha Akomodasi`
+  )
+```
+
+# Pemodelan Awal
+
+```{r}
+model1 <- lm(Y ~ ., data=data)
+summary(model1)
+```
+Persamaan yang terbentuk adalah
+
+$$\hat{Y} = 1240974.70509 + 6966.61471X_1 - 89432.93528X_2 + 0.00004X_3 + 205.09028X_4 - 5502.54246X_5$$
+
+# Pemeriksaan Multikolinieritas
+
+```{r}
+vif(model1)
+```
+
+Hasil uji ini menunjukkan peubah Jumlah Tenaga Kerja, Jumlah Objek Wisata, dan Total Pengeluaran memiliki nilai VIF yang sangat tinggi (>10), bahkan peubah Jumlah Usaha Akomodasi juga tergolong tinggi (>5). Pada analisis kali ini, penanganan dilakukan dengan melakukan seleksi peubah.
+
+
+# Penyeleksian Peubah
+
+## Best Subset
+
+```{r}
+bs <- ols_step_best_subset(model1)
+bs
+```
+Berdasarkan hasil Best Subsets Regression, Model 2 (kombinasi peubah $X_1$ dan $X_3$) dipilih sebagai model terbaik. Meskipun model dengan peubah lebih banyak memiliki nilai $R\text{-Square}$ yang sedikit lebih tinggi, Model 2 menawarkan efisiensi (parsimonious model) paling optimal dengan nilai AIC terendah ($1178.8088$), nilai SBC/BIC terendah ($1184.9143$), serta nilai Adj. R-Square yang sangat tinggi ($0.8581$) dibandingkan model subset lainnya.
+
+## Backward, Forward, dan Stepwise
+
+```{r}
+null<-lm(Y ~ 1, data=data) # 1 here means the intercept 
+full<-lm(Y ~ ., data=data)
+ 
+step(full, scope=list(lower=null, upper=full),data=data, direction='backward', trace=0)
+```
+Menguji dengan cara mengeliminasi peubah tidak signifikan satu per satu dari model penuh. Hasil akhir mempertahankan semua peubah: Y ~ X1 + X2 + X3 + X4 + X5.
+
+```{r}
+step(null, scope=list(lower=null, upper=full),data=data, direction='forward', trace=0)
+```
+Memulai dari model kosong (null model) lalu memasukkan peubah paling potensial satu per satu. Hasil akhir menghasilkan kombinasi peubah: Y ~ X3 + X1 + X5.
+
+```{r}
+step(null, scope=list(lower=null, upper=full),data=data, direction='both', trace=0)
+```
+Mengombinasikan penambahan dan eliminasi peubah secara simultan. Hasil akhir menghasilkan model yang sama dengan metode forward, yaitu mempertahankan peubah: Y ~ X3 + X1 + X5.
+
+```{r}
+# 1. Buat fungsi AICc manual memakai rumus dasar statistika
+hitung_aicc <- function(model) {
+  n <- length(resid(model)) # Jumlah amatan (n)
+  k <- length(coef(model))  # Jumlah parameter/peubah + intercept (k)
+  aic_val <- AIC(model)
+  
+  # Rumus koreksi AICc untuk sampel kecil
+  aicc_val <- aic_val + (2 * k * (k + 1)) / (n - k - 1)
+  return(aicc_val)
+}
+
+# 2. Definisikan objek model
+(model_best_subset <- lm(Y ~ X1 + X3, data = data))
+model_stepwise    <- lm(Y ~ X1 + X3 + X5, data = data)
+model_backward    <- lm(Y ~ X1 + X2 + X3 + X4 + X5, data = data)
+
+# 3. Membuat data frame perbandingan dengan fungsi AICc buatan sendiri
+tabel_perbandingan <- data.frame(
+  Metode = c("Best Subset", "Forward / Stepwise (Both)", "Backward Elimination"),
+  Peubah_Terpilih = c("X1, X3", "X1, X3, X5", "X1, X2, X3, X4, X5"),
+  
+  AIC  = c(AIC(model_best_subset),  AIC(model_stepwise),  AIC(model_backward)),
+  AICc = c(hitung_aicc(model_best_subset), hitung_aicc(model_stepwise), hitung_aicc(model_backward)),
+  BIC  = c(BIC(model_best_subset),  BIC(model_stepwise),  BIC(model_backward)),
+  
+  Adj_R2 = c(summary(model_best_subset)$adj.r.squared, 
+             summary(model_stepwise)$adj.r.squared, 
+             summary(model_backward)$adj.r.squared)
+)
+
+# 4. Tampilkan tabel
+tabel_perbandingan
+```
+
+Berdasarkan pengujian seleksi peubah menggunakan beberapa metode sekuensial, terdapat perbedaan spesifikasi model yang dihasilkan; metode Backward Elimination mempertahankan seluruh peubah (X1, X2, X3, X4, X5), sedangkan metode Forward Selection dan Stepwise (Both) menghasilkan kombinasi peubah X1, X3, dan X5. Jika dibandingkan dengan model dua peubah hasil Best Subset Regression (X1 dan X3), Model Backward memiliki nilai AIC (1178.377) dan Adj. R-Square (0.8699) terbaik karena sifatnya yang mempertahankan banyak peubah. Namun, ketika dievaluasi menggunakan kriteria penalti sampel dan kompleksitas model, model hasil Best Subset (X1 dan X3) terpilih sebagai model final terbaik karena berhasil meminimalkan nilai AICc (1179.609) dan BIC (1184.914) secara optimal, menunjukkan bahwa model ini lebih efisien (parsimonious) dan terhindar dari risiko overfitting.
+
+$$\hat{Y} = -577385.066690 +1267.862614X_1+0.000053X_3$$
+
+# Shrinkage Methods
+
+## Ridge
+
+```{r}
+x <- as.matrix(data[, -1])
+y <- data$Y
+
+rid <- cv.glmnet(x, y, alpha = 0, nfolds = 5)  # Ridge regression
+# secara default, nfolds = 10 sehingga akan buruk ketika n<30
+rid
+coef(rid, s = "lambda.min")
+```
+
+Regresi Ridge ($\alpha = 0$) digunakan untuk mengatasi masalah multikolinieritas ekstrem pada OLS (VIF $X_1 = 97.21$ dan $X_2 = 64.71$). Melalui 5-fold cross-validation, dipilih nilai penalti $\lambda_{\text{min}} = 36,127,691$ yang menghasilkan rata-rata kuadrat galat (MSE) terkecil sebesar $1.524 \times 10^{14}$. Penalti Ridge secara efektif meredam ketidakstabilan model dengan menciutkan seluruh koefisien mendekati nol. Selain itu, Ridge berhasil mengoreksi kesalahan arah pengaruh (misleading sign) pada OLS dengan membalikkan koefisien $X_2$ dan $X_5$ yang semula negatif menjadi bernilai positif.
+
+Persamaan model terbaik yang terbentuk menggunakan $\lambda_{\text{min}}$ adalah:
+
+$$\widehat{Y} = 576,789.26 + 790.87X_1 + 12,969.94X_2 + 0.0000137X_3 + 97.12X_4 + 2,655.08X_5$$
+
+## Lasso
+
+```{r}
+lass <- cv.glmnet(x, y, alpha=1, nfolds = 5)
+lass
+coef(lass,s="lambda.min")
+```
+
+Regresi Lasso ($\alpha = 1$) digunakan untuk mengatasi masalah multikolinieritas sekaligus melakukan seleksi peubah secara otomatis melalui penalti L1. Berdasarkan 5-fold cross-validation, dipilih nilai penalti $\lambda_{\text{min}} = 646,198$ yang menghasilkan rata-rata kuadrat galat (MSE) terkecil sebesar $1.565 \times 10^{14}$. Berbeda dengan Ridge, penalti Lasso secara agresif menciutkan koefisien peubah yang tidak esensial tepat menjadi nol. Dalam kasus ini, peubah $X_2$ dan $X_5$ resmi dikeluarkan dari model (bernilai nol/titik), sehingga menyisakan hanya 3 peubah penjelas aktif (Nonzero = 3) yang paling berpengaruh, yaitu $X_1$, $X_3$, dan $X_4$.
+
+Persamaan model terbaik yang terbentuk menggunakan $\lambda_{\text{min}}$ adalah:
+
+$$\widehat{Y} = -929,025.31 + 974.32X_1 + 0.0000512X_3 + 78.41X_4$$
