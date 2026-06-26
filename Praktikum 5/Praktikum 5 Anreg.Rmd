@@ -1,0 +1,255 @@
+---
+title: "Praktikum 5 Anreg"
+author: "Intan Aisa"
+date: "`r Sys.Date()`"
+output:
+  rmdformats::readthedown
+---
+
+# Library
+
+```{r}
+library(readxl) # untuk membaca data
+library(GGally) # untuk menghasilkan matriks hubungan antarpeubah
+library(corrplot) # untuk menghasilkan matriks korelasi
+library(dplyr) # untuk manipulasi data
+library(car) # untuk memeriksa multikolinearitas
+```
+
+# Data
+
+```{r}
+dt <- read_xlsx("/Users/intanaisa/Documents/Kuliah/Semester 4/Analisis Regresi/Dataset Anreg.xlsx")
+dt
+head(dt) # menampilkan sekian data awal
+str(dt) # menampilkan tipe data setiap peubah
+summary(dt) # menampilkan ringkasan data
+```
+
+```{r}
+dt <- select(dt, -Provinsi)
+```
+
+```{r}
+library(dplyr)
+
+dt <- dt %>% 
+  rename(
+    Y = `Jumlah Pengunjung (Y)`,
+    X1 = `Jumlah Tenaga Kerja`,
+    X2 = `Jumlah Objek Wisata`,
+    X3 = `Total Pengeluaran`,
+    X4 = `Tindak Pidana Korupsi`,
+    X5 = `Usaha Akomodasi`
+  )
+```
+
+# Eksplorasi data
+
+```{r}
+hist(dt$Y, main = "Sebaran Jumlah Pengunjung Objek Wisata")
+```
+
+```{r}
+boxplot(dt$Y, main = "Sebaran Jumlah Pengunjung Objek Wisata")
+```
+
+```{r}
+ggpairs(dt,
+        upper = list(continuous = wrap('cor', size = 3)),
+        title = "Matriks Scatterplot Data")
+
+```
+
+```{r}
+cor_matrix <- cor(dt, use = "complete.obs")
+
+corrplot(cor_matrix, method = "color", type = "lower",
+         col = colorRampPalette(c("red", "white", "blue"))(200),
+         addCoef.col = "black", tl.col = "black", tl.srt = 35)
+```
+
+Berdasarkan visualisasi korelogram, nilai koefisien korelasi Pearson antara variabel respon ($Y$) dengan seluruh variabel prediktor ($X_1, X_2, X_3, X_4, X_5$) menunjukkan hubungan linear positif. Seluruh nilai korelasi bernilai positif (berwarna biru), yang berarti jika variabel prediktor meningkat, maka jumlah pengunjung ($Y$) juga cenderung meningkat.
+
+**Korelasi Antara Variabel Respon ($Y$) dengan Variabel Prediktor**
+
+- $Y$ dengan $X_3$ (Total Pengeluaran): Memiliki hubungan linear positif yang paling kuat dengan nilai korelasi sebesar 0.92. Hal ini menunjukkan bahwa total pengeluaran memiliki pengaruh linear searah yang sangat dominan terhadap jumlah pengunjung.
+
+- $Y$ dengan $X_1$ (Jumlah Tenaga Kerja) & $X_5$ (Usaha Akomodasi): Memiliki hubungan linear positif yang sangat kuat, masing-masing sebesar 0.87 dan 0.84.
+
+- $Y$ dengan $X_2$ (Jumlah Objek Wisata): Memiliki hubungan linear positif yang kuat sebesar 0.81.
+
+- $Y$ dengan $X_4$ (Tindak Pidana Korupsi): Memiliki hubungan linear positif yang paling lemah/moderat di antara variabel lainnya, yaitu sebesar 0.60.
+
+**IIndikasi Multikolinieritas**
+
+Berdasarkan matriks korelasi, ditemukan indikasi kuat terjadinya multikolinieritas tinggi (hubungan linear antar variabel bebas) pada model ini. Hal ini dibuktikan dengan adanya korelasi yang sangat kuat di antara sesama variabel prediktor ($X$), antara lain:
+
+- $X_1$ (Jumlah Tenaga Kerja) dengan $X_2$ (Jumlah Objek Wisata): Korelasi sebesar 0.98 (Sangat Kuat).
+
+- $X_1$ (Jumlah Tenaga Kerja) dengan $X_5$ (Usaha Akomodasi): Korelasi sebesar 0.92 (Sangat Kuat).
+
+- $X_3$ (Total Pengeluaran) dengan $X_5$ (Usaha Akomodasi): Korelasi sebesar 0.92 (Sangat Kuat).
+
+ 
+# Pemodelan
+
+## Tanpa Fungsi
+
+Perhitungan nilai $\hat{\beta}$ secara matriks dapat dilakukan dengan rumus berikut.
+
+$$\hat{\beta} = (X'X)^{-1} X'y$$
+
+```{r}
+# pembentukan matriks
+n <- nrow(dt)
+x0 <- rep(1,n)
+x <- data.frame(x0, dt$X1, dt$X2, dt$X3, dt$X4,
+                dt$X5)
+x <- as.matrix(x)
+y <- dt$Y
+```
+
+```{r, error=TRUE}
+beta_duga <- solve(t(x)%*%x)%*%t(x)%*%y
+beta_duga
+```
+
+Proses pendugaan parameter beta_duga tidak dapat dilakukan dan menghasilkan error: system is computationally singular.Hal ini menunjukkan bahwa matriks $X^T X$ bersifat singular (tidak memiliki invers / nilai determinannya mendekati nol). Nilai reciprocal condition number yang sangat kecil ($3.37631 \times 10^{-24}$, jauh mendekati 0) mengonfirmasi bahwa komputer tidak mampu melakukan inversi matriks secara numerik. Secara statistika, kondisi ini mengindikasikan adanya masalah multikolinieritas sempurna (hubungan linier yang sangat kuat antar variabel independen).
+
+Selang kepercayaan dan pengujian signifikansi setiap parameter dapat dilakukan dengan menghitung keragaman tiap dugaan parameter. Secara umum, nilai ragam dugaan parameter $\hat{\beta}_j$ dapat dihitung melalui rumus berikut.
+
+$$Var(\hat{\beta}_j) = \hat{\sigma}^2 C_{jj}$$
+Dengan matriks $C$ adalah matriks $(X'X)^{-1}$ 
+
+```{r, error=TRUE}
+c <- data.frame(solve(t(x)%*%x))
+```
+Matriks $X^T X$ bersifat singular (tidak memiliki invers / nilai determinannya mendekati nol). Nilai reciprocal condition number yang sangat kecil ($3.37631 \times 10^{-24}$, jauh mendekati 0) mengonfirmasi bahwa komputer tidak mampu melakukan inversi matriks secara numerik. Secara statistika, kondisi ini mengindikasikan adanya masalah multikolinieritas sempurna (hubungan linier yang sangat kuat antar variabel independen).
+
+Unsur diagonal dari matriks $C$ dapat digunakan untuk menghitung nilai galat baku dari setiap dugaan parameter. Galat baku ini dapat digunakan untuk menghitung selang kepercayaan dari dugaan yang dihasilkan.
+
+$$SE(\hat{\beta}_j) = \sqrt{Var(\hat{\beta}_j)} = \sqrt{\sigma^2 C_{jj}} = \hat{\sigma}\sqrt{c_{ii}}$$
+
+Misal ingin dihitung selang kepercayaan dari dugaan parameter $\beta_2$, maka
+
+```{r, error=TRUE}
+y_hat <- x %*% beta_duga
+residuals <- y - y_hat
+n <- nrow(x)
+p <- ncol(x)
+KTG <- sum(residuals^2) / (n - p) 
+
+c22 <- c[2,2]
+
+(se.b2 <- sqrt(KTG*c22))
+```
+```{r, error=TRUE}
+alfa <- 0.05
+
+#Batas Bawah beta2
+(bb.b2 <- beta_duga[3,1] - abs(qt(alfa/2, df=n-p))*se.b2)
+```
+
+```{r, error=TRUE}
+#Batas Atas beta2
+(ba.b2 <- beta_duga[3,1] + abs(qt(alfa/2, df=n-p))*se.b2)
+```
+
+Matriks beta_duga tidak dapat dihasilkan sehingga selang kepercayaan dari dugaan parameter $\beta_2$ juga tak dapat dicari.
+
+# Dengan Fungsi
+
+```{r}
+model1 <- lm(formula = Y ~ ., data = dt)
+summary(model1)
+```
+
+# Pemeriksaan Multikoliniearitas
+
+```{r}
+vif(model1)
+```
+
+Hasil uji ini menunjukkan peubah Jumlah Tenaga Kerja, Jumlah Objek Wisata, dan Total Pengeluaran memiliki nilai VIF yang sangat tinggi (>10), bahkan peubah Jumlah Usaha Akomodasi juga tergolong tinggi (>5). Pada analisis kali ini, penanganan dilakukan dengan menghapus peubah mulai dari yang tertinggi
+
+# Pemodelan Kedua
+```{r}
+options(scipen = 999)
+model2 <- lm(Y ~ X2+X3+X4+X5, data = dt)
+summary(model2)
+```
+
+Persamaan yang terbentuk adalah
+$$\hat{Y}=-442635.90181+20112.12045X_2+0.00006X_3+77.96197X_4-3625.30829X_5$$
+```{r}
+vif(model2)
+```
+
+Model hasil reduksi peubah menunjukkan bahwa nilai VIF < 10 sehingga dinyatakan tidak terjadi multikolinearitas. Namun hampir seluruh parameter masih tidak signifikan, padahal secara simultan model ini sudah signifikan. Artinya ada permasalahan lain yang mungkin belum tertangani, perlu dilakuan uji asumsi dan pemeriksaan pencilan, leverage, dan amatan berpengaruh
+
+# Uji Hipotesis Kesamaan Parameter Regresi
+
+Dari pemodelan sebelumnya, diperoleh persamaan regresi
+
+$$\hat{Y}=-442635.90181+20112.12045X_2+0.00006X_3+77.96197X_4-3625.30829X_5$$
+
+Hasil pemodelan tersebut dapat dilakukan serangkaian uji untuk memeriksa apakah $β_2$ dan $β_4$ dapat diasumsikan sama ketika parameter lainnya diasumsikan sama dengan nol.
+
+Hipotesis yang diuji adalah
+
+$$H_0: β2=β4$$
+$$H_1: β2≠β4$$
+
+Karena peubah $X_2$ dan $X_4$ tidak signifikan maka dapat diasumsikan nol sehingga model dapat disederhanakan menjadi:
+
+$$PPM=β_0+β_2X_2+β_4X_4+ε$$
+Jika $H_0$ benar $(β_2=β_4=β_1')$, model bisa ditulis ulang sebagai
+
+$$Y=β_0+β_1' (X_2+X_4)+ε$$
+
+```{r}
+# Buat peubah baru
+dt$X_new <- dt$X2 + dt$X4
+
+# Model penuh (Full Model)
+model_full <- lm(Y ~ X2 + X4, data = dt)
+
+# Model terbatas (Restricted Model)
+model_restricted <- lm(Y ~ X_new, data = dt)
+
+# Bandingkan dengan Uji F
+anova(model_restricted, model_full)
+```
+
+Hasil perbandingan menunjukkan bahwa nilai p kurang dari alpha sehingga dapat disimpulkan bahwa tolak H0, artinya peubah $X_2$ dan $X_4$ berbeda secara signifikan sehingga tidak dapat digabung. Selanjutnya dapat dipilih apakah akan menggunakan peubah dengan 4 peubah atau hanya 2 peubah berdasarkan indikator Adjusted R-Squared, AIC, dan BIC.
+
+```{r}
+model_all <- lm(Y ~ X2+X3+X4+X5, data = dt)
+summary(model_all)
+```
+
+```{r}
+model_signif <- lm(Y ~ X2+X4, data = dt)
+summary(model_signif)
+```
+
+```{r}
+perbandingan <- data.frame(
+  Model = c("Peubah Penuh", "Dua Peubah"),
+  Adjusted_R2 = as.numeric(c(summary(model_all)$adj.r.squared, summary(model_signif)$adj.r.squared)),
+  AIC = as.numeric(c(AIC(model_all), AIC(model_signif))),
+  BIC = as.numeric(c(BIC(model_all), BIC(model_signif)))
+)
+perbandingan
+```
+
+Berdasarkan indikator Adjusted R square, AIC, dan BIC maka model dengan semua peubah dipilih sebagai model yang terbaik. Persamaan yang terbentuk adalah sebagai berikut
+
+$$\hat{Y}=-442635.90181+20112.12045X_2+0.00006X_3+77.96197X_4-3625.30829X_5$$
+Interpretasi:\
+1. Dugaan rataan nilai $Y$ adalah sebesar $-442635.90181$ apabila variabel $X_2, X_3, X_4,$ dan $X_5$ bernilai 0.\
+2. Dugaan rataan nilai $Y$ akan meningkat sebesar $20112.12045$ satuan apabila variabel $X_2$ meningkat satu satuan, dengan asumsi variabel $X_3, X_4,$ dan $X_5$ konstan.
+3. Dugaan rataan nilai $Y$ akan meningkat sebesar $0.00006$ satuan apabila variabel $X_3$ meningkat satu satuan, dengan asumsi variabel $X_2, X_4,$ dan $X_5$ konstan.\
+4. Dugaan rataan nilai $Y$ akan meningkat sebesar $77.96197$ satuan apabila variabel $X_4$ meningkat satu satuan, dengan asumsi variabel $X_2, X_3,$ dan $X_5$ konstan.\
+5. Dugaan rataan nilai $Y$ akan menurun sebesar $3625.30829$ satuan apabila variabel $X_5$ meningkat satu satuan, dengan asumsi variabel $X_2, X_3,$ dan $X_4$ konstan.
